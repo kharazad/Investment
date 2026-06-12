@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>나의 주식 거래 일지</title>
+  
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    // 아이콘 SVG 컴포넌트
+    const ActivityIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>);
+    const DollarSignIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>);
+    const PlusIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>);
+    const Edit2Icon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>);
+    const Trash2Icon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>);
+    const TrendingUpIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>);
+    const SettingsIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>);
+
+    const StockTracker = () => {
+      // ---------------- 주식 종목 DB 상태 관리 ----------------
+      const initialStocks = ['스페이스X', '애플', '테슬라', '엔비디아', '마이크로소프트'];
+      const [stocks, setStocks] = useState(initialStocks);
+      const [isStockModalOpen, setIsStockModalOpen] = useState(false);
+      const [newStockName, setNewStockName] = useState('');
+
+      // ---------------- 거래 내역 상태 관리 ----------------
+      const initialData = [
+        { id: '1', stockName: '스페이스X', date: '2026-06-13', buyQty: 345, buyPrice: 161.93, sellQty: 345, sellPrice: 167, exchangeRate: 1517.95 },
+        { id: '2', stockName: '스페이스X', date: '2026-06-13', buyQty: 337, buyPrice: 169.96, sellQty: 337, sellPrice: 174.04, exchangeRate: 1517.95 },
+        { id: '3', stockName: '스페이스X', date: '2026-06-13', buyQty: 337, buyPrice: 173.25, sellQty: '', sellPrice: '', exchangeRate: 1517.95 }
+      ];
+
+      const [trades, setTrades] = useState(initialData);
+      const [isEditing, setIsEditing] = useState(false);
+      const [currentId, setCurrentId] = useState(null);
+
+      const [formData, setFormData] = useState({
+        stockName: initialStocks[0],
+        date: new Date().toISOString().split('T')[0],
+        buyQty: '', buyPrice: '', sellQty: '', sellPrice: '', exchangeRate: '',
+      });
+      const [isFetchingRate, setIsFetchingRate] = useState(false);
+
+      // 환율을 가져오는 헬퍼 함수 (에러 로그 억제 및 안정성 강화)
+      const fetchExchangeRate = async (targetDate) => {
+        try {
+          // 1차 시도: 해당 날짜의 환율 조회
+          const res = await fetch(`https://api.frankfurter.app/${targetDate === 'latest' ? 'latest' : targetDate}?from=USD&to=KRW`);
+          if (res.ok) {
+            const data = await res.json();
+            return data.rates.KRW.toFixed(2);
+          }
+        } catch (e) {
+          // API 차단 등 네트워크 에러 시 조용히 무시
+        }
+        
+        // 2차 시도: 백업 API를 통해 최신 환율 조회
+        try {
+          const backupRes = await fetch('https://open.er-api.com/v6/latest/USD');
+          if (backupRes.ok) {
+            const backupData = await backupRes.json();
+            return backupData.rates.KRW.toFixed(2);
+          }
+        } catch (e) {
+          // 조용히 무시
+        }
+        return null; // 모두 실패
+      };
+
+      // 초기 실행 시 오늘 날짜의 최신 환율 불러오기
+      useEffect(() => {
+        const fetchInitialRate = async () => {
+          setIsFetchingRate(true);
+          const rate = await fetchExchangeRate('latest');
+          setFormData(prev => ({ ...prev, exchangeRate: rate || '1350.00' }));
+          setIsFetchingRate(false);
+        };
+        fetchInitialRate();
+      }, []);
+
+      // ---------------- 핸들러 함수들 ----------------
+      const handleChange = async (e) => {
+        const { name, value } = e.target;
+        
+        // 입력값 즉시 반영
+        setFormData(prev => ({ ...prev, [name]: value }));
+
+        // 날짜가 변경되었을 때만 환율 API 호출
+        if (name === 'date') {
+          setIsFetchingRate(true);
+          const rate = await fetchExchangeRate(value);
+          
+          if (rate) {
+            setFormData(prev => ({ ...prev, exchangeRate: rate }));
+          } else {
+            // 통신 실패 시 기존 입력된 환율을 유지하거나 기본값 적용 (화면 멈춤 방지)
+            setFormData(prev => ({ ...prev, exchangeRate: prev.exchangeRate || '1350.00' }));
+          }
+          setIsFetchingRate(false);
+        }
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        
+        if (!formData.stockName) {
+          alert('종목을 선택해주세요.');
+          return;
+        }
+
+        const newTrade = {
+          id: isEditing ? currentId : Date.now().toString(),
+          stockName: formData.stockName,
+          date: formData.date,
+          buyQty: Number(formData.buyQty),
+          buyPrice: Number(formData.buyPrice),
+          sellQty: formData.sellQty ? Number(formData.sellQty) : '',
+          sellPrice: formData.sellPrice ? Number(formData.sellPrice) : '',
+          exchangeRate: formData.exchangeRate ? Number(formData.exchangeRate) : '',
+        };
+
+        if (isEditing) {
+          setTrades(trades.map(trade => trade.id === currentId ? newTrade : trade));
+          setIsEditing(false);
+          setCurrentId(null);
+        } else {
+          setTrades([...trades, newTrade]);
+        }
+
+        setFormData({ ...formData, buyQty: '', buyPrice: '', sellQty: '', sellPrice: '' });
+      };
+
+      const handleEdit = (trade) => {
+        // 만약 기존 거래 내역의 종목이 현재 DB에 없다면 추가해줌
+        if (!stocks.includes(trade.stockName)) {
+          setStocks(prev => [...prev, trade.stockName]);
+        }
+
+        setFormData({
+          stockName: trade.stockName, date: trade.date, buyQty: trade.buyQty, buyPrice: trade.buyPrice,
+          sellQty: trade.sellQty || '', sellPrice: trade.sellPrice || '', exchangeRate: trade.exchangeRate || '',
+        });
+        setIsEditing(true);
+        setCurrentId(trade.id);
+      };
+
+      const handleDelete = (id) => {
+        if(window.confirm('이 거래 내역을 삭제하시겠습니까?')) {
+          setTrades(trades.filter(trade => trade.id !== id));
+        }
+      };
+
+      // 종목 DB 관리 핸들러
+      const handleAddStock = () => {
+        const trimmed = newStockName.trim();
+        if (trimmed && !stocks.includes(trimmed)) {
+          setStocks([...stocks, trimmed]);
+          setNewStockName('');
+          // 새로 추가한 종목을 바로 선택하도록 설정
+          setFormData(prev => ({ ...prev, stockName: trimmed }));
+        }
+      };
+
+      const handleDeleteStock = (stockToDelete) => {
+        const newStocks = stocks.filter(s => s !== stockToDelete);
+        setStocks(newStocks);
+        // 만약 현재 선택된 종목이 삭제되었다면 첫 번째 종목으로 변경
+        if (formData.stockName === stockToDelete) {
+          setFormData(prev => ({ ...prev, stockName: newStocks.length > 0 ? newStocks[0] : '' }));
+        }
+      };
+
+      // ---------------- 계산 로직 ----------------
+      const calculateMetrics = (trade) => {
+        let yieldRate = null;
+        let profit = null;
+        if (trade.sellPrice && trade.buyPrice) {
+          yieldRate = (trade.sellPrice - trade.buyPrice) / trade.buyPrice;
+        }
+        if (trade.sellPrice && trade.buyPrice && trade.sellQty && trade.exchangeRate) {
+          profit = (trade.sellPrice - trade.buyPrice) * trade.sellQty * trade.exchangeRate;
+        }
+        return { yieldRate, profit };
+      };
+
+      const totalRealizedProfit = useMemo(() => {
+        return trades.reduce((sum, trade) => {
+          const { profit } = calculateMetrics(trade);
+          return sum + (profit || 0);
+        }, 0);
+      }, [trades]);
+
+      // ---------------- 포맷팅 함수 ----------------
+      const formatNumber = (num, decimals = 0) => {
+        if (num === null || num === undefined || num === '') return '-';
+        return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals }).format(num);
+      };
+
+      const formatPercent = (num) => {
+        if (num === null || num === undefined) return '-';
+        return `${(num * 100).toFixed(2)}%`;
+      };
+
+      const getColorClass = (value) => {
+        if (!value) return 'text-gray-900';
+        return value > 0 ? 'text-red-500 font-semibold' : value < 0 ? 'text-blue-500 font-semibold' : 'text-gray-900';
+      };
+
+      return (
+        <div className="min-h-screen p-4 md:p-8 font-sans relative">
+          {/* ----- 종목 관리 모달창 ----- */}
+          {isStockModalOpen && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+                <h3 className="text-xl font-bold mb-1 text-gray-800">종목 데이터베이스 관리</h3>
+                <p className="text-sm text-gray-500 mb-4">자주 거래하는 주식 종목을 추가하거나 삭제하세요.</p>
+                
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="text"
+                    value={newStockName}
+                    onChange={(e) => setNewStockName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddStock()}
+                    placeholder="새 종목명 입력 (예: 아마존)"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <button
+                    onClick={handleAddStock}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium whitespace-nowrap"
+                  >
+                    추가
+                  </button>
+                </div>
+                
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <ul className="max-h-60 overflow-y-auto divide-y divide-gray-100 bg-gray-50">
+                    {stocks.length === 0 ? (
+                      <li className="p-4 text-center text-gray-400 text-sm">등록된 종목이 없습니다.</li>
+                    ) : (
+                      stocks.map(stock => (
+                        <li key={stock} className="flex justify-between items-center px-4 py-3 bg-white hover:bg-gray-50 transition-colors">
+                          <span className="font-medium text-gray-700">{stock}</span>
+                          <button
+                            onClick={() => handleDeleteStock(stock)}
+                            className="text-gray-400 hover:text-red-500 p-1 transition-colors"
+                            title="삭제"
+                          >
+                            <Trash2Icon />
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+                
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setIsStockModalOpen(false)}
+                    className="px-5 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    닫기
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* --------------------------- */}
+
+          <div className="max-w-6xl mx-auto space-y-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
+                  <ActivityIcon />
+                  나의 주식 거래 일지
+                </h1>
+                <p className="text-gray-500 mt-1">매수/매도 내역 및 수익률을 꼼꼼하게 기록하세요.</p>
+              </div>
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 min-w-[250px]">
+                <div className="p-3 bg-indigo-50 rounded-lg">
+                  <DollarSignIcon />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 font-medium">총 실현 수익금 (KRW)</p>
+                  <p className={`text-2xl font-bold ${totalRealizedProfit >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                    {totalRealizedProfit >= 0 ? '+' : ''}{formatNumber(totalRealizedProfit)}원
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                  {isEditing ? <Edit2Icon /> : <PlusIcon />}
+                  {isEditing ? '거래 내역 수정' : '새 거래 추가'}
+                </h2>
+              </div>
+              <form onSubmit={handleSubmit} className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* 종목명 입력 부분 변경 (Select + 종목 관리 버튼) */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-medium text-gray-700">종목명</label>
+                      <button 
+                        type="button" 
+                        onClick={() => setIsStockModalOpen(true)} 
+                        className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 font-medium transition-colors"
+                      >
+                        <SettingsIcon /> 관리
+                      </button>
+                    </div>
+                    <select 
+                      name="stockName" 
+                      value={formData.stockName} 
+                      onChange={handleChange} 
+                      required 
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all bg-white appearance-none cursor-pointer"
+                    >
+                      {stocks.length === 0 && <option value="" disabled>등록된 종목이 없습니다</option>}
+                      {stocks.map(stock => (
+                        <option key={stock} value={stock}>{stock}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">날짜</label><input type="date" name="date" value={formData.date} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
+                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매수량</label><input type="number" step="any" name="buyQty" value={formData.buyQty} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
+                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매수가 ($)</label><input type="number" step="any" name="buyPrice" value={formData.buyPrice} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
+                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매도량 (선택)</label><input type="number" step="any" name="sellQty" value={formData.sellQty} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
+                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매도가 ($) (선택)</label><input type="number" step="any" name="sellPrice" value={formData.sellPrice} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-700 flex justify-between items-center">
+                      <span>적용 환율 (원)</span>
+                      {isFetchingRate && <span className="text-xs text-indigo-500 animate-pulse font-normal">환율 불러오는 중...</span>}
+                    </label>
+                    <input type="number" step="any" name="exchangeRate" value={formData.exchangeRate} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                  </div>
+                  <div className="flex items-end lg:col-span-1"><button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">{isEditing ? '수정 완료' : '기록 추가'}</button></div>
+                </div>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2"><TrendingUpIcon /> 거래 내역</h2>
+                <span className="text-sm text-gray-500">총 {trades.length}건</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-xs text-gray-500 uppercase bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-4 font-semibold">종목명</th><th className="px-6 py-4 font-semibold">날짜</th><th className="px-6 py-4 text-right font-semibold">매수량</th><th className="px-6 py-4 text-right font-semibold">매수가</th><th className="px-6 py-4 text-right font-semibold">매도량</th><th className="px-6 py-4 text-right font-semibold">매도가</th><th className="px-6 py-4 text-right font-semibold">수익률</th><th className="px-6 py-4 text-right font-semibold">환율</th><th className="px-6 py-4 text-right font-semibold">수익금(KRW)</th><th className="px-6 py-4 text-center font-semibold">관리</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {trades.length === 0 ? (
+                      <tr><td colSpan="10" className="px-6 py-12 text-center text-gray-400">기록된 거래 내역이 없습니다.</td></tr>
+                    ) : (
+                      trades.map((trade) => {
+                        const { yieldRate, profit } = calculateMetrics(trade);
+                        return (
+                          <tr key={trade.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{trade.stockName}</td>
+                            <td className="px-6 py-4 text-gray-500">{trade.date}</td>
+                            <td className="px-6 py-4 text-right text-gray-700">{formatNumber(trade.buyQty)}</td>
+                            <td className="px-6 py-4 text-right text-gray-700">${formatNumber(trade.buyPrice, 2)}</td>
+                            <td className="px-6 py-4 text-right text-gray-700">{formatNumber(trade.sellQty) === '-' ? <span className="text-gray-300">보유중</span> : formatNumber(trade.sellQty)}</td>
+                            <td className="px-6 py-4 text-right text-gray-700">{trade.sellPrice ? `$${formatNumber(trade.sellPrice, 2)}` : '-'}</td>
+                            <td className={`px-6 py-4 text-right ${getColorClass(yieldRate)}`}>{formatPercent(yieldRate)}</td>
+                            <td className="px-6 py-4 text-right text-gray-500">{formatNumber(trade.exchangeRate, 2)}</td>
+                            <td className={`px-6 py-4 text-right font-bold ${getColorClass(profit)}`}>{profit ? `${profit > 0 ? '+' : ''}${formatNumber(profit)}` : '-'}</td>
+                            <td className="px-6 py-4 text-center">
+                              <div className="flex justify-center gap-3">
+                                <button onClick={() => handleEdit(trade)} className="text-gray-400 hover:text-indigo-600 transition-colors" title="수정하기"><Edit2Icon /></button>
+                                <button onClick={() => handleDelete(trade.id)} className="text-gray-400 hover:text-red-500 transition-colors" title="삭제하기"><Trash2Icon /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<StockTracker />);
+  </script>
+</body>
+</html>

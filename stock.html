@@ -32,19 +32,15 @@
     } catch(e) {}
 
     // 🔥 외부(GitHub 등) 배포용 Firebase 설정 🔥
-    // 여러 기기에서 데이터를 연동하려면 https://firebase.google.com/ 에서 새 프로젝트를 만들고 설정값을 여기에 넣으세요.
-    const myFirebaseConfig = null; 
-    /* 작성 예시 (자신의 Firebase 프로젝트 정보로 교체해야 합니다):
-const myFirebaseConfig = {
-  apiKey: "AIzaSyAJ9wGycYaeftpSMxb4jbqSmS8XiNRSxmE",
-  authDomain: "lyh-investment.firebaseapp.com",
-  projectId: "lyh-investment",
-  storageBucket: "lyh-investment.firebasestorage.app",
-  messagingSenderId: "834678087007",
-  appId: "1:834678087007:web:f980c1d89fb893ae57aaea",
-  measurementId: "G-TXYE8H374B"
-};
-    */
+    const myFirebaseConfig = {
+      apiKey: "AIzaSyAJ9wGycYaeftpSMxb4jbqSmS8XiNRSxmE",
+      authDomain: "lyh-investment.firebaseapp.com",
+      projectId: "lyh-investment",
+      storageBucket: "lyh-investment.firebasestorage.app",
+      messagingSenderId: "834678087007",
+      appId: "1:834678087007:web:f980c1d89fb893ae57aaea",
+      measurementId: "G-TXYE8H374B"
+    };
 
     const finalConfig = envFirebaseConfig || myFirebaseConfig;
 

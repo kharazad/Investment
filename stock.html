@@ -23,12 +23,43 @@
 
     const { useState, useMemo, useEffect } = React;
 
-    // --- Firebase 초기화 ---
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // --- Firebase 초기화 및 안전장치 ---
+    let envFirebaseConfig = null;
+    try {
+      if (typeof __firebase_config !== 'undefined') {
+        envFirebaseConfig = JSON.parse(__firebase_config);
+      }
+    } catch(e) {}
+
+    // 🔥 외부(GitHub 등) 배포용 Firebase 설정 🔥
+    // 여러 기기에서 데이터를 연동하려면 https://firebase.google.com/ 에서 새 프로젝트를 만들고 설정값을 여기에 넣으세요.
+    const myFirebaseConfig = null; 
+    /* 작성 예시 (자신의 Firebase 프로젝트 정보로 교체해야 합니다):
+const myFirebaseConfig = {
+  apiKey: "AIzaSyAJ9wGycYaeftpSMxb4jbqSmS8XiNRSxmE",
+  authDomain: "lyh-investment.firebaseapp.com",
+  projectId: "lyh-investment",
+  storageBucket: "lyh-investment.firebasestorage.app",
+  messagingSenderId: "834678087007",
+  appId: "1:834678087007:web:f980c1d89fb893ae57aaea",
+  measurementId: "G-TXYE8H374B"
+};
+    */
+
+    const finalConfig = envFirebaseConfig || myFirebaseConfig;
+
+    let app, auth, db;
+    let isCloudReady = false;
+
+    // 설정값이 유효할 때만 클라우드 DB 연결을 시도하여 크래시 방지
+    if (finalConfig && finalConfig.apiKey) {
+      app = initializeApp(finalConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+      isCloudReady = true;
+    }
+
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'github-stock-tracker-app';
 
     // 아이콘 SVG 컴포넌트들
     const ActivityIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>);
@@ -43,7 +74,7 @@
       // ---------------- 상태 관리 ----------------
       const [user, setUser] = useState(null);
       const [authResolved, setAuthResolved] = useState(false);
-      const [stocks, setStocks] = useState(['스페이스X', '애플', '테슬라', '엔비디아', '마이크로소프트']); // 기본값
+      const [stocks, setStocks] = useState(['스페이스X', '애플', '테슬라', '엔비디아', '마이크로소프트']);
       const [trades, setTrades] = useState([]);
       const [isStockModalOpen, setIsStockModalOpen] = useState(false);
       const [newStockName, setNewStockName] = useState('');
@@ -64,6 +95,8 @@
 
       // ---------------- 1. Firebase 로그인 초기화 ----------------
       useEffect(() => {
+        if (!isCloudReady) return; // 클라우드 설정이 없으면 실행 중지
+        
         const initAuth = async () => {
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
             await signInWithCustomToken(auth, __initial_auth_token);
@@ -82,7 +115,7 @@
 
       // ---------------- 2. Firebase 데이터 실시간 구독 ----------------
       useEffect(() => {
-        if (!user) return;
+        if (!user || !isCloudReady) return;
 
         // 거래 내역 불러오기
         const tradesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'trades');
@@ -162,7 +195,7 @@
       // ---------------- 핸들러 (Firestore 저장 로직 추가) ----------------
       const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!user) return;
+        if (!user || !isCloudReady) return;
         
         if (!formData.stockName) {
           setAlertMsg('종목을 선택해주세요.');
@@ -197,7 +230,7 @@
       const handleEdit = async (trade) => {
         if (!stocks.includes(trade.stockName)) {
           const newStocks = [...stocks, trade.stockName];
-          if (user) {
+          if (user && isCloudReady) {
             await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
           }
         }
@@ -212,7 +245,7 @@
 
       const handleDelete = (id) => {
         setConfirmAction(() => async () => {
-          if (user) {
+          if (user && isCloudReady) {
             try {
               await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'trades', id));
             } catch (err) {
@@ -229,7 +262,7 @@
           const newStocks = [...stocks, trimmed];
           setNewStockName('');
           setFormData(prev => ({ ...prev, stockName: trimmed }));
-          if (user) {
+          if (user && isCloudReady) {
             await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
           }
         }
@@ -240,7 +273,7 @@
         if (formData.stockName === stockToDelete) {
           setFormData(prev => ({ ...prev, stockName: newStocks.length > 0 ? newStocks[0] : '' }));
         }
-        if (user) {
+        if (user && isCloudReady) {
           await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
         }
       };
@@ -280,6 +313,24 @@
         if (!value) return 'text-gray-900';
         return value > 0 ? 'text-red-500 font-semibold' : value < 0 ? 'text-blue-500 font-semibold' : 'text-gray-900';
       };
+
+      // 외부 배포 시 DB 정보가 없으면 보여주는 안내 화면
+      if (!isCloudReady) {
+        return (
+          <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 font-sans">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 max-w-lg text-center space-y-4">
+              <div className="mx-auto w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800">클라우드 데이터베이스 설정 필요</h2>
+              <p className="text-gray-600 break-keep">
+                현재 버전은 여러 기기 간 데이터 동기화를 지원합니다.<br/>
+                깃허브 페이지에서 정상 작동하려면, HTML 코드 내의 <code>myFirebaseConfig</code> 변수에 본인의 <strong>Firebase 연결 설정 정보</strong>를 직접 입력해주셔야 합니다.
+              </p>
+            </div>
+          </div>
+        );
+      }
 
       // 화면이 로딩 중일 때 표시할 UI
       if (!authResolved) {

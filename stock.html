@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>나의 주식 거래 일지</title>
+  <title>나의 주식 거래 일지 (클라우드 동기화)</title>
   
   <!-- React & ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -16,10 +16,21 @@
 <body class="bg-gray-50">
   <div id="root"></div>
 
-  <script type="text/babel">
+  <script type="text/babel" data-type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
     const { useState, useMemo, useEffect } = React;
 
-    // 아이콘 SVG 컴포넌트
+    // --- Firebase 초기화 ---
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+    // 아이콘 SVG 컴포넌트들
     const ActivityIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>);
     const DollarSignIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>);
     const PlusIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>);
@@ -29,57 +40,99 @@
     const SettingsIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>);
 
     const StockTracker = () => {
-      // ---------------- 주식 종목 DB 상태 관리 ----------------
-      const initialStocks = ['스페이스X', '애플', '테슬라', '엔비디아', '마이크로소프트'];
-      const [stocks, setStocks] = useState(initialStocks);
+      // ---------------- 상태 관리 ----------------
+      const [user, setUser] = useState(null);
+      const [authResolved, setAuthResolved] = useState(false);
+      const [stocks, setStocks] = useState(['스페이스X', '애플', '테슬라', '엔비디아', '마이크로소프트']); // 기본값
+      const [trades, setTrades] = useState([]);
       const [isStockModalOpen, setIsStockModalOpen] = useState(false);
       const [newStockName, setNewStockName] = useState('');
-
-      // ---------------- 거래 내역 상태 관리 ----------------
-      const initialData = [
-        { id: '1', stockName: '스페이스X', date: '2026-06-13', buyQty: 345, buyPrice: 161.93, sellQty: 345, sellPrice: 167, exchangeRate: 1517.95 },
-        { id: '2', stockName: '스페이스X', date: '2026-06-13', buyQty: 337, buyPrice: 169.96, sellQty: 337, sellPrice: 174.04, exchangeRate: 1517.95 },
-        { id: '3', stockName: '스페이스X', date: '2026-06-13', buyQty: 337, buyPrice: 173.25, sellQty: '', sellPrice: '', exchangeRate: 1517.95 }
-      ];
-
-      const [trades, setTrades] = useState(initialData);
+      
       const [isEditing, setIsEditing] = useState(false);
       const [currentId, setCurrentId] = useState(null);
 
+      // 모달 상태 관리
+      const [alertMsg, setAlertMsg] = useState('');
+      const [confirmAction, setConfirmAction] = useState(null);
+
       const [formData, setFormData] = useState({
-        stockName: initialStocks[0],
+        stockName: '',
         date: new Date().toISOString().split('T')[0],
         buyQty: '', buyPrice: '', sellQty: '', sellPrice: '', exchangeRate: '',
       });
       const [isFetchingRate, setIsFetchingRate] = useState(false);
 
-      // 환율을 가져오는 헬퍼 함수 (에러 로그 억제 및 안정성 강화)
+      // ---------------- 1. Firebase 로그인 초기화 ----------------
+      useEffect(() => {
+        const initAuth = async () => {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+            await signInAnonymously(auth);
+          }
+        };
+        initAuth();
+
+        const unsubscribe = onAuthStateChanged(auth, (u) => {
+          setUser(u);
+          setAuthResolved(true);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      // ---------------- 2. Firebase 데이터 실시간 구독 ----------------
+      useEffect(() => {
+        if (!user) return;
+
+        // 거래 내역 불러오기
+        const tradesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'trades');
+        const unsubTrades = onSnapshot(tradesRef, (snapshot) => {
+          const loadedTrades = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // 최신순 정렬
+          loadedTrades.sort((a, b) => b.id.localeCompare(a.id));
+          setTrades(loadedTrades);
+        }, (error) => {
+          console.error("데이터 불러오기 에러:", error);
+          setAlertMsg('데이터를 불러오는데 실패했습니다.');
+        });
+
+        // 종목 리스트 불러오기
+        const stocksDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks');
+        const unsubStocks = onSnapshot(stocksDocRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const loadedStocks = docSnap.data().list || [];
+            setStocks(loadedStocks);
+            setFormData(prev => ({ ...prev, stockName: prev.stockName || loadedStocks[0] || '' }));
+          } else {
+            setFormData(prev => ({ ...prev, stockName: prev.stockName || '스페이스X' }));
+          }
+        }, (error) => console.error("종목 데이터 불러오기 에러:", error));
+
+        return () => {
+          unsubTrades();
+          unsubStocks();
+        };
+      }, [user]);
+
+      // ---------------- 환율 자동 불러오기 로직 ----------------
       const fetchExchangeRate = async (targetDate) => {
         try {
-          // 1차 시도: 해당 날짜의 환율 조회
           const res = await fetch(`https://api.frankfurter.app/${targetDate === 'latest' ? 'latest' : targetDate}?from=USD&to=KRW`);
           if (res.ok) {
             const data = await res.json();
             return data.rates.KRW.toFixed(2);
           }
-        } catch (e) {
-          // API 차단 등 네트워크 에러 시 조용히 무시
-        }
-        
-        // 2차 시도: 백업 API를 통해 최신 환율 조회
+        } catch (e) {}
         try {
           const backupRes = await fetch('https://open.er-api.com/v6/latest/USD');
           if (backupRes.ok) {
             const backupData = await backupRes.json();
             return backupData.rates.KRW.toFixed(2);
           }
-        } catch (e) {
-          // 조용히 무시
-        }
-        return null; // 모두 실패
+        } catch (e) {}
+        return null;
       };
 
-      // 초기 실행 시 오늘 날짜의 최신 환율 불러오기
       useEffect(() => {
         const fetchInitialRate = async () => {
           setIsFetchingRate(true);
@@ -90,38 +143,34 @@
         fetchInitialRate();
       }, []);
 
-      // ---------------- 핸들러 함수들 ----------------
       const handleChange = async (e) => {
         const { name, value } = e.target;
-        
-        // 입력값 즉시 반영
         setFormData(prev => ({ ...prev, [name]: value }));
 
-        // 날짜가 변경되었을 때만 환율 API 호출
         if (name === 'date') {
           setIsFetchingRate(true);
           const rate = await fetchExchangeRate(value);
-          
           if (rate) {
             setFormData(prev => ({ ...prev, exchangeRate: rate }));
           } else {
-            // 통신 실패 시 기존 입력된 환율을 유지하거나 기본값 적용 (화면 멈춤 방지)
             setFormData(prev => ({ ...prev, exchangeRate: prev.exchangeRate || '1350.00' }));
           }
           setIsFetchingRate(false);
         }
       };
 
-      const handleSubmit = (e) => {
+      // ---------------- 핸들러 (Firestore 저장 로직 추가) ----------------
+      const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!user) return;
         
         if (!formData.stockName) {
-          alert('종목을 선택해주세요.');
+          setAlertMsg('종목을 선택해주세요.');
           return;
         }
 
+        const tradeId = isEditing ? currentId : Date.now().toString();
         const newTrade = {
-          id: isEditing ? currentId : Date.now().toString(),
           stockName: formData.stockName,
           date: formData.date,
           buyQty: Number(formData.buyQty),
@@ -131,21 +180,26 @@
           exchangeRate: formData.exchangeRate ? Number(formData.exchangeRate) : '',
         };
 
-        if (isEditing) {
-          setTrades(trades.map(trade => trade.id === currentId ? newTrade : trade));
-          setIsEditing(false);
-          setCurrentId(null);
-        } else {
-          setTrades([...trades, newTrade]);
+        try {
+          // Firestore에 데이터 저장/수정
+          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'trades', tradeId), newTrade);
+          
+          if (isEditing) {
+            setIsEditing(false);
+            setCurrentId(null);
+          }
+          setFormData({ ...formData, buyQty: '', buyPrice: '', sellQty: '', sellPrice: '' });
+        } catch (error) {
+          setAlertMsg('저장 중 오류가 발생했습니다.');
         }
-
-        setFormData({ ...formData, buyQty: '', buyPrice: '', sellQty: '', sellPrice: '' });
       };
 
-      const handleEdit = (trade) => {
-        // 만약 기존 거래 내역의 종목이 현재 DB에 없다면 추가해줌
+      const handleEdit = async (trade) => {
         if (!stocks.includes(trade.stockName)) {
-          setStocks(prev => [...prev, trade.stockName]);
+          const newStocks = [...stocks, trade.stockName];
+          if (user) {
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
+          }
         }
 
         setFormData({
@@ -157,32 +211,41 @@
       };
 
       const handleDelete = (id) => {
-        if(window.confirm('이 거래 내역을 삭제하시겠습니까?')) {
-          setTrades(trades.filter(trade => trade.id !== id));
-        }
+        setConfirmAction(() => async () => {
+          if (user) {
+            try {
+              await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'trades', id));
+            } catch (err) {
+              setAlertMsg('삭제 중 오류가 발생했습니다.');
+            }
+          }
+          setConfirmAction(null);
+        });
       };
 
-      // 종목 DB 관리 핸들러
-      const handleAddStock = () => {
+      const handleAddStock = async () => {
         const trimmed = newStockName.trim();
         if (trimmed && !stocks.includes(trimmed)) {
-          setStocks([...stocks, trimmed]);
+          const newStocks = [...stocks, trimmed];
           setNewStockName('');
-          // 새로 추가한 종목을 바로 선택하도록 설정
           setFormData(prev => ({ ...prev, stockName: trimmed }));
+          if (user) {
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
+          }
         }
       };
 
-      const handleDeleteStock = (stockToDelete) => {
+      const handleDeleteStock = async (stockToDelete) => {
         const newStocks = stocks.filter(s => s !== stockToDelete);
-        setStocks(newStocks);
-        // 만약 현재 선택된 종목이 삭제되었다면 첫 번째 종목으로 변경
         if (formData.stockName === stockToDelete) {
           setFormData(prev => ({ ...prev, stockName: newStocks.length > 0 ? newStocks[0] : '' }));
         }
+        if (user) {
+          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
+        }
       };
 
-      // ---------------- 계산 로직 ----------------
+      // ---------------- 계산 ----------------
       const calculateMetrics = (trade) => {
         let yieldRate = null;
         let profit = null;
@@ -202,7 +265,7 @@
         }, 0);
       }, [trades]);
 
-      // ---------------- 포맷팅 함수 ----------------
+      // ---------------- 포맷팅 ----------------
       const formatNumber = (num, decimals = 0) => {
         if (num === null || num === undefined || num === '') return '-';
         return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals }).format(num);
@@ -218,8 +281,42 @@
         return value > 0 ? 'text-red-500 font-semibold' : value < 0 ? 'text-blue-500 font-semibold' : 'text-gray-900';
       };
 
+      // 화면이 로딩 중일 때 표시할 UI
+      if (!authResolved) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="animate-pulse text-indigo-600 font-bold text-xl flex items-center gap-2">
+              <ActivityIcon /> 앱 환경 설정 중...
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="min-h-screen p-4 md:p-8 font-sans relative">
+          
+          {/* ----- 공통 모달 UI ----- */}
+          {alertMsg && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+              <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm text-center">
+                <h3 className="text-lg font-medium mb-5 text-gray-800">{alertMsg}</h3>
+                <button onClick={() => setAlertMsg('')} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">확인</button>
+              </div>
+            </div>
+          )}
+
+          {confirmAction && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+              <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm text-center">
+                <h3 className="text-lg font-medium mb-5 text-gray-800">이 거래 내역을 삭제하시겠습니까?</h3>
+                <div className="flex justify-center gap-3">
+                  <button onClick={() => setConfirmAction(null)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">취소</button>
+                  <button onClick={confirmAction} className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">삭제</button>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* ----- 종목 관리 모달창 ----- */}
           {isStockModalOpen && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -285,7 +382,7 @@
                   <ActivityIcon />
                   나의 주식 거래 일지
                 </h1>
-                <p className="text-gray-500 mt-1">매수/매도 내역 및 수익률을 꼼꼼하게 기록하세요.</p>
+                <p className="text-gray-500 mt-1">클라우드 동기화 됨 · 매수/매도 내역을 기록하세요.</p>
               </div>
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 min-w-[250px]">
                 <div className="p-3 bg-indigo-50 rounded-lg">
@@ -309,7 +406,6 @@
               </div>
               <form onSubmit={handleSubmit} className="p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* 종목명 입력 부분 변경 (Select + 종목 관리 버튼) */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-center">
                       <label className="text-sm font-medium text-gray-700">종목명</label>
@@ -343,7 +439,7 @@
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-700 flex justify-between items-center">
                       <span>적용 환율 (원)</span>
-                      {isFetchingRate && <span className="text-xs text-indigo-500 animate-pulse font-normal">환율 불러오는 중...</span>}
+                      {isFetchingRate && <span className="text-xs text-indigo-500 animate-pulse font-normal">불러오는 중...</span>}
                     </label>
                     <input type="number" step="any" name="exchangeRate" value={formData.exchangeRate} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
                   </div>
@@ -366,7 +462,7 @@
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {trades.length === 0 ? (
-                      <tr><td colSpan="10" className="px-6 py-12 text-center text-gray-400">기록된 거래 내역이 없습니다.</td></tr>
+                      <tr><td colSpan="10" className="px-6 py-12 text-center text-gray-400">클라우드에 저장된 거래 내역이 없습니다.</td></tr>
                     ) : (
                       trades.map((trade) => {
                         const { yieldRate, profit } = calculateMetrics(trade);

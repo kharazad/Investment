@@ -145,13 +145,30 @@
 
       // ---------------- 환율 자동 불러오기 로직 ----------------
       const fetchExchangeRate = async (targetDate) => {
+        if (!targetDate) return null;
+        
+        // 오늘 날짜 구하기 (미래 날짜 예외 처리를 위함)
+        const today = new Date().toISOString().split('T')[0];
+        // 요청 날짜가 오늘보다 미래인 경우 최신(latest) 환율로 안전하게 요청
+        const queryDate = (targetDate === 'latest' || targetDate > today) ? 'latest' : targetDate;
+
         try {
-          const res = await fetch(`https://api.frankfurter.app/${targetDate === 'latest' ? 'latest' : targetDate}?from=USD&to=KRW`);
+          const res = await fetch(`https://api.frankfurter.app/${queryDate}?from=USD&to=KRW`);
           if (res.ok) {
             const data = await res.json();
             return data.rates.KRW.toFixed(2);
+          } else if (queryDate !== 'latest') {
+            // 주말/공휴일 등 특정 일자의 데이터가 없어 에러가 나면 최신 환율로 재시도
+            const fallbackRes = await fetch(`https://api.frankfurter.app/latest?from=USD&to=KRW`);
+            if (fallbackRes.ok) {
+              const fallbackData = await fallbackRes.json();
+              return fallbackData.rates.KRW.toFixed(2);
+            }
           }
-        } catch (e) {}
+        } catch (e) {
+          console.warn('주 환율 API 에러, 백업 API로 시도합니다.');
+        }
+        
         try {
           const backupRes = await fetch('https://open.er-api.com/v6/latest/USD');
           if (backupRes.ok) {
@@ -159,6 +176,7 @@
             return backupData.rates.KRW.toFixed(2);
           }
         } catch (e) {}
+        
         return null;
       };
 
@@ -176,13 +194,11 @@
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
 
-        if (name === 'date') {
+        if (name === 'date' && value) {
           setIsFetchingRate(true);
           const rate = await fetchExchangeRate(value);
           if (rate) {
             setFormData(prev => ({ ...prev, exchangeRate: rate }));
-          } else {
-            setFormData(prev => ({ ...prev, exchangeRate: prev.exchangeRate || '1350.00' }));
           }
           setIsFetchingRate(false);
         }

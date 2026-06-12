@@ -147,33 +147,51 @@
       const fetchExchangeRate = async (targetDate) => {
         if (!targetDate) return null;
         
-        // 오늘 날짜 구하기 (미래 날짜 예외 처리를 위함)
-        const today = new Date().toISOString().split('T')[0];
-        // 요청 날짜가 오늘보다 미래인 경우 최신(latest) 환율로 안전하게 요청
-        const queryDate = (targetDate === 'latest' || targetDate > today) ? 'latest' : targetDate;
+        // 시차 오류를 방지하기 위해 사용자 브라우저 기준 로컬 날짜 계산
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const localToday = `${year}-${month}-${day}`;
+        
+        // 미래 날짜이거나 'latest'인 경우 최신으로 강제 조정
+        const queryDate = (targetDate === 'latest' || targetDate > localToday) ? 'latest' : targetDate;
 
         try {
+          // 1. 메인 API (Frankfurter - ECB 기준)
           const res = await fetch(`https://api.frankfurter.app/${queryDate}?from=USD&to=KRW`);
           if (res.ok) {
             const data = await res.json();
             return data.rates.KRW.toFixed(2);
-          } else if (queryDate !== 'latest') {
-            // 주말/공휴일 등 특정 일자의 데이터가 없어 에러가 나면 최신 환율로 재시도
-            const fallbackRes = await fetch(`https://api.frankfurter.app/latest?from=USD&to=KRW`);
-            if (fallbackRes.ok) {
-              const fallbackData = await fallbackRes.json();
-              return fallbackData.rates.KRW.toFixed(2);
-            }
           }
         } catch (e) {
-          console.warn('주 환율 API 에러, 백업 API로 시도합니다.');
+          console.warn('메인 API 통신 실패');
         }
         
         try {
-          const backupRes = await fetch('https://open.er-api.com/v6/latest/USD');
+          // 2. 백업 API (과거 날짜가 더 확실하게 지원되는 API로 교체/추가)
+          const backupUrl = queryDate === 'latest' 
+            ? 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json'
+            : `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${queryDate}/v1/currencies/usd.json`;
+            
+          const backupRes = await fetch(backupUrl);
           if (backupRes.ok) {
             const backupData = await backupRes.json();
-            return backupData.rates.KRW.toFixed(2);
+            if (backupData && backupData.usd && backupData.usd.krw) {
+              return backupData.usd.krw.toFixed(2);
+            }
+          }
+        } catch (e) {
+          console.warn('백업 API 1 통신 실패');
+        }
+
+        try {
+          // 3. 최종 보험용 API (무조건 가장 최신 환율 반환)
+          // (위 두 API가 특정 공휴일/주말 등의 이유로 과거 데이터를 찾지 못했을 때 화면 멈춤 방지용)
+          const finalFallbackRes = await fetch('https://open.er-api.com/v6/latest/USD');
+          if (finalFallbackRes.ok) {
+            const fallbackData = await finalFallbackRes.json();
+            return fallbackData.rates.KRW.toFixed(2);
           }
         } catch (e) {}
         

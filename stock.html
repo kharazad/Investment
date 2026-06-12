@@ -70,7 +70,7 @@
       // ---------------- 상태 관리 ----------------
       const [user, setUser] = useState(null);
       const [authResolved, setAuthResolved] = useState(false);
-      const [stocks, setStocks] = useState(['스페이스X', '애플', '테슬라', '엔비디아', '마이크로소프트']);
+      const [stocks, setStocks] = useState(['스페이스X', '애플', '테슬라', '엔비디아', '마이크로소프트', '삼성전자']);
       const [trades, setTrades] = useState([]);
       const [isStockModalOpen, setIsStockModalOpen] = useState(false);
       const [newStockName, setNewStockName] = useState('');
@@ -78,11 +78,11 @@
       const [isEditing, setIsEditing] = useState(false);
       const [currentId, setCurrentId] = useState(null);
 
-      // 모달 상태 관리
       const [alertMsg, setAlertMsg] = useState('');
       const [confirmAction, setConfirmAction] = useState(null);
 
       const [formData, setFormData] = useState({
+        marketType: 'international', // 'international' 또는 'domestic'
         stockName: '',
         date: new Date().toISOString().split('T')[0],
         buyQty: '', buyPrice: '', sellQty: '', sellPrice: '', exchangeRate: '',
@@ -91,7 +91,7 @@
 
       // ---------------- 1. Firebase 로그인 초기화 ----------------
       useEffect(() => {
-        if (!isCloudReady) return; // 클라우드 설정이 없으면 실행 중지
+        if (!isCloudReady) return; 
         
         const initAuth = async () => {
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -113,11 +113,9 @@
       useEffect(() => {
         if (!user || !isCloudReady) return;
 
-        // 거래 내역 불러오기
         const tradesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'trades');
         const unsubTrades = onSnapshot(tradesRef, (snapshot) => {
           const loadedTrades = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          // 최신순 정렬
           loadedTrades.sort((a, b) => b.id.localeCompare(a.id));
           setTrades(loadedTrades);
         }, (error) => {
@@ -125,7 +123,6 @@
           setAlertMsg('데이터를 불러오는데 실패했습니다.');
         });
 
-        // 종목 리스트 불러오기
         const stocksDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks');
         const unsubStocks = onSnapshot(stocksDocRef, (docSnap) => {
           if (docSnap.exists()) {
@@ -143,86 +140,78 @@
         };
       }, [user]);
 
-      // ---------------- 환율 자동 불러오기 로직 ----------------
-      const fetchExchangeRate = async (targetDate) => {
-        if (!targetDate) return null;
+      // ---------------- 강력한 환율 자동 불러오기 로직 (최대 7일 과거 탐색) ----------------
+      const fetchExchangeRate = async (dateStr) => {
+        if (!dateStr) return null;
         
-        // 시차 오류를 방지하기 위해 사용자 브라우저 기준 로컬 날짜 계산
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const localToday = `${year}-${month}-${day}`;
+        let targetDate = new Date(dateStr);
+        const today = new Date();
         
-        // 미래 날짜이거나 'latest'인 경우 최신으로 강제 조정
-        const queryDate = (targetDate === 'latest' || targetDate > localToday) ? 'latest' : targetDate;
-
-        try {
-          // 1. 메인 API (Frankfurter - ECB 기준)
-          const res = await fetch(`https://api.frankfurter.app/${queryDate}?from=USD&to=KRW`);
-          if (res.ok) {
-            const data = await res.json();
-            return data.rates.KRW.toFixed(2);
-          }
-        } catch (e) {
-          console.warn('메인 API 통신 실패');
+        // 미래 날짜를 선택한 경우 오늘 날짜로 맞춤
+        if (targetDate > today) {
+          targetDate = today;
         }
-        
-        try {
-          // 2. 백업 API (과거 날짜가 더 확실하게 지원되는 API로 교체/추가)
-          const backupUrl = queryDate === 'latest' 
-            ? 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json'
-            : `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${queryDate}/v1/currencies/usd.json`;
-            
-          const backupRes = await fetch(backupUrl);
-          if (backupRes.ok) {
-            const backupData = await backupRes.json();
-            if (backupData && backupData.usd && backupData.usd.krw) {
-              return backupData.usd.krw.toFixed(2);
+
+        // 주말/공휴일 대응: 선택 날짜부터 과거로 최대 7일까지 환율 데이터가 있는지 거슬러 올라가며 탐색
+        for(let i = 0; i < 7; i++) {
+          const yyyy = targetDate.getFullYear();
+          const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+          const dd = String(targetDate.getDate()).padStart(2, '0');
+          const queryStr = `${yyyy}-${mm}-${dd}`;
+
+          try {
+            const res = await fetch(`https://api.frankfurter.app/${queryStr}?from=USD&to=KRW`);
+            if (res.ok) {
+              const data = await res.json();
+              return data.rates.KRW.toFixed(2);
             }
+          } catch (e) {
+            // 통신 에러 발생 시 무시하고 다음 과거 날짜로 진행
           }
-        } catch (e) {
-          console.warn('백업 API 1 통신 실패');
+          // 하루 전으로 이동
+          targetDate.setDate(targetDate.getDate() - 1);
         }
-
-        try {
-          // 3. 최종 보험용 API (무조건 가장 최신 환율 반환)
-          // (위 두 API가 특정 공휴일/주말 등의 이유로 과거 데이터를 찾지 못했을 때 화면 멈춤 방지용)
-          const finalFallbackRes = await fetch('https://open.er-api.com/v6/latest/USD');
-          if (finalFallbackRes.ok) {
-            const fallbackData = await finalFallbackRes.json();
-            return fallbackData.rates.KRW.toFixed(2);
-          }
-        } catch (e) {}
         
         return null;
       };
 
       useEffect(() => {
-        const fetchInitialRate = async () => {
-          setIsFetchingRate(true);
-          const rate = await fetchExchangeRate('latest');
-          setFormData(prev => ({ ...prev, exchangeRate: rate || '1350.00' }));
-          setIsFetchingRate(false);
-        };
-        fetchInitialRate();
+        // 초기 실행 시
+        if (formData.marketType === 'international') {
+          const fetchInitialRate = async () => {
+            setIsFetchingRate(true);
+            const rate = await fetchExchangeRate(new Date().toISOString().split('T')[0]);
+            setFormData(prev => ({ ...prev, exchangeRate: rate || '1350.00' }));
+            setIsFetchingRate(false);
+          };
+          fetchInitialRate();
+        }
       }, []);
 
       const handleChange = async (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
 
-        if (name === 'date' && value) {
-          setIsFetchingRate(true);
-          const rate = await fetchExchangeRate(value);
-          if (rate) {
-            setFormData(prev => ({ ...prev, exchangeRate: rate }));
+        // 시장(해외/국내) 변경이나 날짜 변경 시 환율 업데이트
+        if (name === 'date' || name === 'marketType') {
+          const currentMarket = name === 'marketType' ? value : formData.marketType;
+          const currentDate = name === 'date' ? value : formData.date;
+
+          if (currentMarket === 'international' && currentDate) {
+            setIsFetchingRate(true);
+            const rate = await fetchExchangeRate(currentDate);
+            if (rate) {
+              setFormData(prev => ({ ...prev, exchangeRate: rate, marketType: currentMarket, date: currentDate }));
+            }
+            setIsFetchingRate(false);
+          } else if (currentMarket === 'domestic') {
+            // 국내주식이면 환율 데이터 클리어
+            setFormData(prev => ({ ...prev, exchangeRate: '', marketType: currentMarket, date: currentDate }));
           }
-          setIsFetchingRate(false);
         }
       };
 
-      // ---------------- 핸들러 (Firestore 저장 로직 추가) ----------------
+      // ---------------- 핸들러 (Firestore 저장 로직) ----------------
       const handleSubmit = async (e) => {
         e.preventDefault();
         if (!user || !isCloudReady) return;
@@ -234,17 +223,17 @@
 
         const tradeId = isEditing ? currentId : Date.now().toString();
         const newTrade = {
+          marketType: formData.marketType,
           stockName: formData.stockName,
           date: formData.date,
           buyQty: Number(formData.buyQty),
           buyPrice: Number(formData.buyPrice),
           sellQty: formData.sellQty ? Number(formData.sellQty) : '',
           sellPrice: formData.sellPrice ? Number(formData.sellPrice) : '',
-          exchangeRate: formData.exchangeRate ? Number(formData.exchangeRate) : '',
+          exchangeRate: formData.marketType === 'international' && formData.exchangeRate ? Number(formData.exchangeRate) : '',
         };
 
         try {
-          // Firestore에 데이터 저장/수정
           await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'trades', tradeId), newTrade);
           
           if (isEditing) {
@@ -265,9 +254,18 @@
           }
         }
 
+        // 기존 데이터에 marketType이 없으면 환율 유무로 해외/국내 판별 (하위 호환성)
+        const detectedMarket = trade.marketType || (trade.exchangeRate ? 'international' : 'domestic');
+
         setFormData({
-          stockName: trade.stockName, date: trade.date, buyQty: trade.buyQty, buyPrice: trade.buyPrice,
-          sellQty: trade.sellQty || '', sellPrice: trade.sellPrice || '', exchangeRate: trade.exchangeRate || '',
+          marketType: detectedMarket,
+          stockName: trade.stockName, 
+          date: trade.date, 
+          buyQty: trade.buyQty, 
+          buyPrice: trade.buyPrice,
+          sellQty: trade.sellQty || '', 
+          sellPrice: trade.sellPrice || '', 
+          exchangeRate: trade.exchangeRate || '',
         });
         setIsEditing(true);
         setCurrentId(trade.id);
@@ -308,17 +306,25 @@
         }
       };
 
-      // ---------------- 계산 ----------------
+      // ---------------- 계산 로직 ----------------
       const calculateMetrics = (trade) => {
         let yieldRate = null;
         let profit = null;
+        const isDomestic = trade.marketType === 'domestic' || (!trade.marketType && !trade.exchangeRate);
+
         if (trade.sellPrice && trade.buyPrice) {
           yieldRate = (trade.sellPrice - trade.buyPrice) / trade.buyPrice;
         }
-        if (trade.sellPrice && trade.buyPrice && trade.sellQty && trade.exchangeRate) {
-          profit = (trade.sellPrice - trade.buyPrice) * trade.sellQty * trade.exchangeRate;
+        if (trade.sellPrice && trade.buyPrice && trade.sellQty) {
+          if (isDomestic) {
+            // 국내주식: (매도가 - 매수가) * 수량
+            profit = (trade.sellPrice - trade.buyPrice) * trade.sellQty;
+          } else {
+            // 해외주식: (매도가 - 매수가) * 수량 * 환율
+            profit = (trade.sellPrice - trade.buyPrice) * trade.sellQty * (trade.exchangeRate || 1);
+          }
         }
-        return { yieldRate, profit };
+        return { yieldRate, profit, isDomestic };
       };
 
       const totalRealizedProfit = useMemo(() => {
@@ -362,7 +368,6 @@
         );
       }
 
-      // 화면이 로딩 중일 때 표시할 UI
       if (!authResolved) {
         return (
           <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -372,6 +377,8 @@
           </div>
         );
       }
+
+      const isDomesticForm = formData.marketType === 'domestic';
 
       return (
         <div className="min-h-screen p-4 md:p-8 font-sans relative">
@@ -486,6 +493,36 @@
                 </h2>
               </div>
               <form onSubmit={handleSubmit} className="p-6">
+                {/* 🌟 국내/해외 주식 선택 라디오 버튼 🌟 */}
+                <div className="flex gap-6 mb-5 border-b border-gray-100 pb-5">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input 
+                      type="radio" 
+                      name="marketType" 
+                      value="international" 
+                      checked={formData.marketType === 'international'} 
+                      onChange={handleChange} 
+                      className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className={`text-sm font-semibold ${formData.marketType === 'international' ? 'text-indigo-600' : 'text-gray-500 group-hover:text-gray-700'}`}>
+                      🇺🇸 해외주식
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input 
+                      type="radio" 
+                      name="marketType" 
+                      value="domestic" 
+                      checked={formData.marketType === 'domestic'} 
+                      onChange={handleChange} 
+                      className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className={`text-sm font-semibold ${formData.marketType === 'domestic' ? 'text-indigo-600' : 'text-gray-500 group-hover:text-gray-700'}`}>
+                      🇰🇷 국내주식
+                    </span>
+                  </label>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="space-y-1">
                     <div className="flex justify-between items-center">
@@ -514,17 +551,36 @@
                   
                   <div className="space-y-1"><label className="text-sm font-medium text-gray-700">날짜</label><input type="date" name="date" value={formData.date} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
                   <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매수량</label><input type="number" step="any" name="buyQty" value={formData.buyQty} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
-                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매수가 ($)</label><input type="number" step="any" name="buyPrice" value={formData.buyPrice} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
-                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매도량 (선택)</label><input type="number" step="any" name="sellQty" value={formData.sellQty} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
-                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매도가 ($) (선택)</label><input type="number" step="any" name="sellPrice" value={formData.sellPrice} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
+                  
+                  {/* 동적 라벨: 시장에 따라 달러($) 또는 원(원) 표시 */}
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-700 flex justify-between items-center">
-                      <span>적용 환율 (원)</span>
-                      {isFetchingRate && <span className="text-xs text-indigo-500 animate-pulse font-normal">불러오는 중...</span>}
+                    <label className="text-sm font-medium text-gray-700">
+                      매수가 {isDomesticForm ? '(원)' : '($)'}
                     </label>
-                    <input type="number" step="any" name="exchangeRate" value={formData.exchangeRate} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                    <input type="number" step="any" name="buyPrice" value={formData.buyPrice} onChange={handleChange} required placeholder={isDomesticForm ? '예: 85000' : '예: 150.5'} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
                   </div>
-                  <div className="flex items-end lg:col-span-1"><button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">{isEditing ? '수정 완료' : '기록 추가'}</button></div>
+                  <div className="space-y-1"><label className="text-sm font-medium text-gray-700">매도량 <span className="text-gray-400 font-normal">(선택)</span></label><input type="number" step="any" name="sellQty" value={formData.sellQty} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-700">
+                      매도가 {isDomesticForm ? '(원)' : '($)'} <span className="text-gray-400 font-normal">(선택)</span>
+                    </label>
+                    <input type="number" step="any" name="sellPrice" value={formData.sellPrice} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                  </div>
+                  
+                  {/* 해외주식일 때만 환율 입력칸 표시 */}
+                  {!isDomesticForm && (
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-700 flex justify-between items-center">
+                        <span>적용 환율 (원)</span>
+                        {isFetchingRate && <span className="text-xs text-indigo-500 animate-pulse font-normal">탐색 중...</span>}
+                      </label>
+                      <input type="number" step="any" name="exchangeRate" value={formData.exchangeRate} onChange={handleChange} required={!isDomesticForm} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all bg-indigo-50" />
+                    </div>
+                  )}
+
+                  <div className={`flex items-end ${isDomesticForm ? 'lg:col-span-2' : 'lg:col-span-1'}`}>
+                    <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">{isEditing ? '수정 완료' : '기록 추가'}</button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -538,7 +594,16 @@
                 <table className="w-full text-sm text-left">
                   <thead className="text-xs text-gray-500 uppercase bg-gray-50">
                     <tr>
-                      <th className="px-6 py-4 font-semibold">종목명</th><th className="px-6 py-4 font-semibold">날짜</th><th className="px-6 py-4 text-right font-semibold">매수량</th><th className="px-6 py-4 text-right font-semibold">매수가</th><th className="px-6 py-4 text-right font-semibold">매도량</th><th className="px-6 py-4 text-right font-semibold">매도가</th><th className="px-6 py-4 text-right font-semibold">수익률</th><th className="px-6 py-4 text-right font-semibold">환율</th><th className="px-6 py-4 text-right font-semibold">수익금(KRW)</th><th className="px-6 py-4 text-center font-semibold">관리</th>
+                      <th className="px-6 py-4 font-semibold">종목명</th>
+                      <th className="px-6 py-4 font-semibold">날짜</th>
+                      <th className="px-6 py-4 text-right font-semibold">매수량</th>
+                      <th className="px-6 py-4 text-right font-semibold">매수가</th>
+                      <th className="px-6 py-4 text-right font-semibold">매도량</th>
+                      <th className="px-6 py-4 text-right font-semibold">매도가</th>
+                      <th className="px-6 py-4 text-right font-semibold">수익률</th>
+                      <th className="px-6 py-4 text-right font-semibold">환율</th>
+                      <th className="px-6 py-4 text-right font-semibold">수익금(KRW)</th>
+                      <th className="px-6 py-4 text-center font-semibold">관리</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -546,17 +611,28 @@
                       <tr><td colSpan="10" className="px-6 py-12 text-center text-gray-400">클라우드에 저장된 거래 내역이 없습니다.</td></tr>
                     ) : (
                       trades.map((trade) => {
-                        const { yieldRate, profit } = calculateMetrics(trade);
+                        const { yieldRate, profit, isDomestic } = calculateMetrics(trade);
                         return (
                           <tr key={trade.id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{trade.stockName}</td>
+                            <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">
+                              <span className={`inline-block mr-2 px-2 py-0.5 text-[10px] font-bold rounded-sm ${isDomestic ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                                {isDomestic ? '국내' : '해외'}
+                              </span>
+                              {trade.stockName}
+                            </td>
                             <td className="px-6 py-4 text-gray-500">{trade.date}</td>
                             <td className="px-6 py-4 text-right text-gray-700">{formatNumber(trade.buyQty)}</td>
-                            <td className="px-6 py-4 text-right text-gray-700">${formatNumber(trade.buyPrice, 2)}</td>
+                            <td className="px-6 py-4 text-right text-gray-700">
+                              {isDomestic ? `${formatNumber(trade.buyPrice)}원` : `$${formatNumber(trade.buyPrice, 2)}`}
+                            </td>
                             <td className="px-6 py-4 text-right text-gray-700">{formatNumber(trade.sellQty) === '-' ? <span className="text-gray-300">보유중</span> : formatNumber(trade.sellQty)}</td>
-                            <td className="px-6 py-4 text-right text-gray-700">{trade.sellPrice ? `$${formatNumber(trade.sellPrice, 2)}` : '-'}</td>
+                            <td className="px-6 py-4 text-right text-gray-700">
+                              {trade.sellPrice ? (isDomestic ? `${formatNumber(trade.sellPrice)}원` : `$${formatNumber(trade.sellPrice, 2)}`) : '-'}
+                            </td>
                             <td className={`px-6 py-4 text-right ${getColorClass(yieldRate)}`}>{formatPercent(yieldRate)}</td>
-                            <td className="px-6 py-4 text-right text-gray-500">{formatNumber(trade.exchangeRate, 2)}</td>
+                            <td className="px-6 py-4 text-right text-gray-500">
+                              {isDomestic ? '-' : formatNumber(trade.exchangeRate, 2)}
+                            </td>
                             <td className={`px-6 py-4 text-right font-bold ${getColorClass(profit)}`}>{profit ? `${profit > 0 ? '+' : ''}${formatNumber(profit)}` : '-'}</td>
                             <td className="px-6 py-4 text-center">
                               <div className="flex justify-center gap-3">

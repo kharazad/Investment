@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -109,11 +110,12 @@
         return () => unsubscribe();
       }, []);
 
-      // ---------------- 2. Firebase 데이터 실시간 구독 ----------------
+      // ---------------- 2. Firebase 데이터 실시간 구독 (공유 경로로 변경) ----------------
       useEffect(() => {
         if (!user || !isCloudReady) return;
 
-        const tradesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'trades');
+        // PC와 폰의 임시 ID가 달라도 데이터를 공유할 수 있도록 'public' 경로에 저장
+        const tradesRef = collection(db, 'artifacts', appId, 'public', 'data', 'shared_trades');
         const unsubTrades = onSnapshot(tradesRef, (snapshot) => {
           const loadedTrades = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           loadedTrades.sort((a, b) => b.id.localeCompare(a.id));
@@ -123,7 +125,8 @@
           setAlertMsg('데이터를 불러오는데 실패했습니다.');
         });
 
-        const stocksDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks');
+        // 종목 리스트 불러오기 (공유)
+        const stocksDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_settings', 'stocks');
         const unsubStocks = onSnapshot(stocksDocRef, (docSnap) => {
           if (docSnap.exists()) {
             const loadedStocks = docSnap.data().list || [];
@@ -211,7 +214,7 @@
         }
       };
 
-      // ---------------- 핸들러 (Firestore 저장 로직) ----------------
+      // ---------------- 핸들러 (Firestore 저장 로직, 공유 경로로 저장) ----------------
       const handleSubmit = async (e) => {
         e.preventDefault();
         if (!user || !isCloudReady) return;
@@ -234,7 +237,8 @@
         };
 
         try {
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'trades', tradeId), newTrade);
+          // Firestore에 데이터 저장/수정 (공유 경로)
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_trades', tradeId), newTrade);
           
           if (isEditing) {
             setIsEditing(false);
@@ -242,7 +246,8 @@
           }
           setFormData({ ...formData, buyQty: '', buyPrice: '', sellQty: '', sellPrice: '' });
         } catch (error) {
-          setAlertMsg('저장 중 오류가 발생했습니다.');
+          setAlertMsg('저장 중 오류가 발생했습니다. (권한 문제일 수 있습니다)');
+          console.error(error);
         }
       };
 
@@ -250,7 +255,7 @@
         if (!stocks.includes(trade.stockName)) {
           const newStocks = [...stocks, trade.stockName];
           if (user && isCloudReady) {
-            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_settings', 'stocks'), { list: newStocks });
           }
         }
 
@@ -275,7 +280,7 @@
         setConfirmAction(() => async () => {
           if (user && isCloudReady) {
             try {
-              await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'trades', id));
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_trades', id));
             } catch (err) {
               setAlertMsg('삭제 중 오류가 발생했습니다.');
             }
@@ -291,7 +296,7 @@
           setNewStockName('');
           setFormData(prev => ({ ...prev, stockName: trimmed }));
           if (user && isCloudReady) {
-            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_settings', 'stocks'), { list: newStocks });
           }
         }
       };
@@ -302,7 +307,7 @@
           setFormData(prev => ({ ...prev, stockName: newStocks.length > 0 ? newStocks[0] : '' }));
         }
         if (user && isCloudReady) {
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'stocks'), { list: newStocks });
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'shared_settings', 'stocks'), { list: newStocks });
         }
       };
 
@@ -658,3 +663,6 @@
   </script>
 </body>
 </html>
+
+
+```
